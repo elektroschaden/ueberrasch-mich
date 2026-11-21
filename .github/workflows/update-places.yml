@@ -14,7 +14,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python import_places.py
+      - name: Install OSM reader
+        run: python -m pip install osmium
+      - name: Download Geofabrik Berlin/Brandenburg extract
+        run: |
+          curl --fail --location --retry 3 --connect-timeout 20 --max-time 600 \
+            --output region.osm.pbf \
+            https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf
+          test -s region.osm.pbf
+      - name: Build static place list
+        run: python import_places.py
       - name: Commit updated place data
         run: |
           git config user.name "github-actions[bot]"
