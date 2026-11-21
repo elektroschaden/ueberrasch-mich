@@ -9,31 +9,25 @@ const filters={nature:['["leisure"~"^(park|garden)$"]','["tourism"="viewpoint"]'
 const chosen=n=>document.querySelector('input[name="'+n+'"]:checked').value;
 const distance=(a,b,c,d)=>{const r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,z=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 12742*Math.atan2(Math.sqrt(z),Math.sqrt(1-z))};
 function locate(){return new Promise((ok,no)=>{if(!navigator.geolocation)return no(Error('Standortbestimmung nicht unterstützt.'));navigator.geolocation.getCurrentPosition(p=>ok({lat:p.coords.latitude,lon:p.coords.longitude}),e=>no(Error(e.code===1?'Bitte erlaube Chrome den Standortzugriff in den Website-Einstellungen.':'Standort konnte nicht bestimmt werden.')),{timeout:10000,maximumAge:300000,enableHighAccuracy:false})})}
+let allPlaces=null;
 async function load(lat,lon,r,cat){
- const types=cat==='all'?Object.values(filters).flat():filters[cat];
- const endpoints=['https://overpass.kumi.systems/api/interpreter','https://overpass.nchc.org.tw/api/interpreter'];
- for(let attempt=0;attempt<3;attempt++){
-  const angle=Math.random()*Math.PI*2,dist=Math.sqrt(Math.random())*Math.max(.3,r-.5);
-  const a=lat+Math.cos(angle)*dist/111.2;
-  const b=lon+Math.sin(angle)*dist/(111.2*Math.max(.2,Math.cos(lat*Math.PI/180)));
-  const localRadius=r<=3?650:r<=7?900:1300;
-  const query='[out:json][timeout:7];('+types.map(t=>'nwr'+t+'["name"](around:'+localRadius+','+a+','+b+');').join('')+');out center 45;';
-  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),9000);
+ if(!allPlaces){
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),12000);
   try{
-   const response=await fetch(endpoints[attempt%endpoints.length],{method:'POST',body:new URLSearchParams({data:query}),signal:ctrl.signal});
-   if(!response.ok)continue;
-   const data=await response.json();
-   const found=data.elements.map(e=>{const x=e.lat??e.center?.lat,y=e.lon??e.center?.lon,n=e.tags?.name?.trim();if(!n||x==null||y==null)return null;const d=distance(lat,lon,x,y);if(d<.25||d>r)return null;return{id:e.type+e.id,name:n,lat:x,lon:y,distance:d,kind:e.tags.amenity?'Kaffee & Essen':e.tags.natural||e.tags.leisure?'Natur & draußen':'Kultur & Kurioses'}}).filter(Boolean);
-   if(found.length)return found;
-  }catch(e){}finally{clearTimeout(timer)}
+   const response=await fetch('./places.json',{signal:ctrl.signal,cache:'no-cache'});
+   if(!response.ok)throw Error('Ortsliste noch nicht veröffentlicht.');
+   allPlaces=await response.json();
+   if(!Array.isArray(allPlaces))throw Error('Ungültige Ortsliste.');
+  }catch(e){throw Error('Die Ortsliste ist noch nicht verfügbar. Bitte zuerst den GitHub-Datenimport starten.')}
+  finally{clearTimeout(timer)}
  }
- throw Error('Gerade keinen passenden Ort gefunden. Bitte nochmal versuchen.');
+ return allPlaces.filter(p=>(cat==='all'||p.category===cat)).map(p=>({...p,distance:distance(lat,lon,p.lat,p.lon),kind:p.category==='food'?'Kaffee & Essen':p.category==='nature'?'Natur & draußen':'Kultur & Kurioses'})).filter(p=>p.distance>=.25&&p.distance<=r);
 }
 function pick(){let options=pool.filter(p=>!used.has(p.id));if(!options.length){used.clear();options=pool}if(!options.length)throw Error('Keine Orte gefunden. Bitte Radius vergrößern.');current=options[Math.floor(Math.random()*options.length)];used.add(current.id);$('result').classList.remove('hidden');$('teaser').classList.remove('hidden');$('revealed').classList.add('hidden');$('distance').textContent=current.distance.toLocaleString('de-DE',{maximumFractionDigits:1})+' km entfernt';$('status').textContent=''}
 async function surprise(){if(busy)return;busy=true;$('go').disabled=true;$('again').disabled=true;$('result').classList.add('hidden');
  try{
   const p=pos||await locate(),r=+chosen('radius'),cat=chosen('category'),key=r+':'+cat;
-  if(true){$('status').textContent='Suche Überraschungen in deiner Nähe …';pool=await load(p.lat,p.lon,r,cat);used.clear();lastKey=key;pos=p}
+  if(key!==lastKey||!pool.length){$('status').textContent='Lade Orte in deiner Nähe …';pool=await load(p.lat,p.lon,r,cat);used.clear();lastKey=key;pos=p}
   pick()
  }catch(e){$('status').textContent=e.message}
  finally{busy=false;$('go').disabled=false;$('again').disabled=false}
